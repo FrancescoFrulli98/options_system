@@ -3,60 +3,65 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.stats import norm
 
-# === Inizializzazione del session_state ===
+# === Inizializzazione session_state ===
 if 'portfolio' not in st.session_state:
     st.session_state['portfolio'] = []
 
-# === Funzioni di supporto ===
+# === Funzioni Black-Scholes ===
 def d1(S, K, T, r, q, sigma):
     return (np.log(S / K) + (r - q + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
 
 def d2(S, K, T, r, q, sigma):
     return d1(S, K, T, r, q, sigma) - sigma * np.sqrt(T)
 
-# === Classe per le opzioni ===
+# === Classe Opzione ===
 class Option:
-    def __init__(self, kind, S, K, T, r, q, sigma, qty):
-        self.kind = kind  # Tipo di opzione (Call/Put)
-        self.S = S        # Spot
-        self.K = K        # Strike
-        self.T = T        # Tempo a scadenza
-        self.r = r        # Tasso di interesse
-        self.q = q        # Dividendo
-        self.sigma = sigma # Volatilità
-        self.qty = qty     # Quantità
+    def __init__(self, kind, position, S, K, T, r, q, sigma, qty):
+        self.kind = kind        # 'Call' o 'Put'
+        self.position = position  # 'Buy' o 'Sell'
+        self.S = S
+        self.K = K
+        self.T = T
+        self.r = r
+        self.q = q
+        self.sigma = sigma
+        self.qty = qty
 
-    # Funzione per calcolare il prezzo della call (Black-Scholes)
     def bs_call_price(self):
         d1_val = d1(self.S, self.K, self.T, self.r, self.q, self.sigma)
         d2_val = d2(self.S, self.K, self.T, self.r, self.q, self.sigma)
         return self.S * np.exp(-self.q * self.T) * norm.cdf(d1_val) - self.K * np.exp(-self.r * self.T) * norm.cdf(d2_val)
 
-    # Funzione per calcolare il prezzo della put (Black-Scholes)
     def bs_put_price(self):
         d1_val = d1(self.S, self.K, self.T, self.r, self.q, self.sigma)
         d2_val = d2(self.S, self.K, self.T, self.r, self.q, self.sigma)
         return self.K * np.exp(-self.r * self.T) * norm.cdf(-d2_val) - self.S * np.exp(-self.q * self.T) * norm.cdf(-d1_val)
 
-    # Metodo per calcolare il payoff dell'opzione alla scadenza
     def payoff(self, spot):
+        payoff = 0
         if self.kind == 'Call':
-            return max(spot - self.K, 0)
+            payoff = max(spot - self.K, 0)
         elif self.kind == 'Put':
-            return max(self.K - spot, 0)
+            payoff = max(self.K - spot, 0)
+        # Inverti il segno se è una vendita
+        if self.position == 'Sell':
+            payoff *= -1
+        return payoff
 
-    # === Greche ===
+    def sign(self):
+        return 1 if self.position == 'Buy' else -1
+
     def delta(self):
         d1_val = d1(self.S, self.K, self.T, self.r, self.q, self.sigma)
-        return np.exp(-self.q * self.T) * norm.cdf(d1_val)
+        return self.sign() * np.exp(-self.q * self.T) * norm.cdf(d1_val)
 
     def gamma(self):
         d1_val = d1(self.S, self.K, self.T, self.r, self.q, self.sigma)
-        return np.exp(-self.q * self.T) * norm.pdf(d1_val) / (self.S * self.sigma * np.sqrt(self.T))
+        return self.sign() * np.exp(-self.q * self.T) * norm.pdf(d1_val) / (self.S * self.sigma * np.sqrt(self.T))
 
     def vega(self):
         d1_val = d1(self.S, self.K, self.T, self.r, self.q, self.sigma)
-        return self.S * np.exp(-self.q * self.T) * norm.pdf(d1_val) * np.sqrt(self.T)
+        return self.sign() * self.S * np.exp(-self.q * self.T) * norm.pdf(d1_val) * np.sqrt(self.T)
 
     def theta(self):
         d1_val = d1(self.S, self.K, self.T, self.r, self.q, self.sigma)
@@ -64,61 +69,93 @@ class Option:
         term1 = -self.S * norm.pdf(d1_val) * self.sigma * np.exp(-self.q * self.T) / (2 * np.sqrt(self.T))
         term2 = -self.r * self.K * np.exp(-self.r * self.T) * norm.cdf(d2_val)
         term3 = self.q * self.S * np.exp(-self.q * self.T) * norm.cdf(d1_val)
-        return term1 + term2 + term3
+        return self.sign() * (term1 + term2 + term3)
 
     def rho(self):
         d2_val = d2(self.S, self.K, self.T, self.r, self.q, self.sigma)
-        return self.K * self.T * np.exp(-self.r * self.T) * norm.cdf(d2_val)
+        return self.sign() * self.K * self.T * np.exp(-self.r * self.T) * norm.cdf(d2_val)
 
-# === Input dell'utente per una nuova opzione ===
+# === Input per una nuova opzione ===
 st.header("Aggiungi una nuova opzione al portafoglio")
 
 kind = st.selectbox("Tipo di opzione", ["Call", "Put"])
-S = st.number_input("Prezzo Spot (S)", value=100)
-K = st.number_input("Strike (K)", value=100)
-T = st.number_input("Tempo a scadenza (in anni)", value=1.0)
+position = st.selectbox("Posizione", ["Buy", "Sell"])
+S = st.number_input("Prezzo Spot (S)", value=100.0)
+K = st.number_input("Strike (K)", value=100.0)
+T = st.number_input("Tempo a scadenza (anni)", value=1.0)
 r = st.number_input("Tasso di interesse (r)", value=0.05)
 q = st.number_input("Dividendo (q)", value=0.0)
 sigma = st.number_input("Volatilità (σ)", value=0.2)
 qty = st.number_input("Quantità", value=1)
 
-# Aggiungi opzione al portfolio
 if st.button("Aggiungi al portafoglio"):
-    option = Option(kind, S, K, T, r, q, sigma, qty)
+    option = Option(kind, position, S, K, T, r, q, sigma, qty)
     st.session_state['portfolio'].append(option)
-    st.success(f"Opzione {kind} aggiunta al portafoglio!")
+    st.success(f"{position} {kind} aggiunta al portafoglio!")
 
 # === Visualizzazione del portafoglio ===
-if 'portfolio' in st.session_state and len(st.session_state['portfolio']) > 0:
+if st.session_state['portfolio']:
     st.header("Portafoglio Attuale")
-    
-    # Mostra una lista delle opzioni nel portafoglio
+
+    total_delta = 0
+    total_gamma = 0
+    total_vega = 0
+    total_theta = 0
+    total_rho = 0
+    remove_idx = None
+
     for idx, option in enumerate(st.session_state['portfolio']):
-        st.subheader(f"Opzione {idx + 1}: {option.kind}")
+        st.subheader(f"Opzione {idx + 1}: {option.position} {option.kind}")
         st.write(f"Spot: {option.S}, Strike: {option.K}, Tempo: {option.T}, Quantità: {option.qty}")
-        st.write(f"Prezzo Call (Black-Scholes): {option.bs_call_price():.2f}")
-        st.write(f"Prezzo Put (Black-Scholes): {option.bs_put_price():.2f}")
+        st.write(f"Prezzo Call: {option.bs_call_price():.2f}")
+        st.write(f"Prezzo Put: {option.bs_put_price():.2f}")
         
-        # Visualizza le greche per ogni opzione
-        st.write(f"Delta: {option.delta():.4f}")
-        st.write(f"Gamma: {option.gamma():.4f}")
-        st.write(f"Vega: {option.vega():.4f}")
-        st.write(f"Theta: {option.theta():.4f}")
-        st.write(f"Rho: {option.rho():.4f}")
-    
-    # Calcolo del payoff complessivo
-    st.header("Grafico del Payoff Complessivo del Portafoglio")
-    
-    # Range di prezzi spot per il grafico
-    spot_range = np.linspace(0, 200, 100)
+        delta = option.delta() * option.qty
+        gamma = option.gamma() * option.qty
+        vega = option.vega() * option.qty
+        theta = option.theta() * option.qty
+        rho = option.rho() * option.qty
+
+        st.write(f"Delta: {delta:.4f}")
+        st.write(f"Gamma: {gamma:.4f}")
+        st.write(f"Vega: {vega:.4f}")
+        st.write(f"Theta: {theta:.4f}")
+        st.write(f"Rho: {rho:.4f}")
+
+        total_delta += delta
+        total_gamma += gamma
+        total_vega += vega
+        total_theta += theta
+        total_rho += rho
+
+        if st.button(f"Rimuovi Opzione {idx + 1}"):
+            remove_idx = idx
+
+    if remove_idx is not None:
+        st.session_state['portfolio'].pop(remove_idx)
+        st.experimental_rerun()
+
+    # Greche totali
+    st.subheader("Greche Totali del Portafoglio")
+    st.write(f"Delta Totale: {total_delta:.4f}")
+    st.write(f"Gamma Totale: {total_gamma:.4f}")
+    st.write(f"Vega Totale: {total_vega:.4f}")
+    st.write(f"Theta Totale: {total_theta:.4f}")
+    st.write(f"Rho Totale: {total_rho:.4f}")
+
+    # === Grafico del payoff ===
+    st.header("Grafico del Payoff Complessivo")
+    spot_range = np.linspace(0, 200, 200)
     total_payoff = np.zeros_like(spot_range)
-    
+
     for option in st.session_state['portfolio']:
-        total_payoff += option.qty * np.array([option.payoff(spot) for spot in spot_range])
-    
-    # Visualizza il grafico
-    plt.plot(spot_range, total_payoff)
-    plt.title("Payoff Complessivo del Portafoglio")
+        total_payoff += option.qty * np.array([option.payoff(s) for s in spot_range])
+
+    plt.figure()
+    plt.plot(spot_range, total_payoff, label="Payoff Totale")
+    plt.axhline(0, color='gray', linestyle='--')
     plt.xlabel("Prezzo Spot alla Scadenza")
     plt.ylabel("Payoff")
+    plt.title("Payoff del Portafoglio")
+    plt.legend()
     st.pyplot(plt)
